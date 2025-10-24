@@ -390,20 +390,34 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
                 val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
                 val factoryOptions = BitmapFactory.Options().apply { inSampleSize = 2 }
                 var originalBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, factoryOptions)
-                originalBitmap = convertToWhiteBackground(originalBitmap)
+                
+                // Converter para escala de cinza e depois para preto e branco
+                originalBitmap = convertColorImageToMonochrome(originalBitmap)
 
-                val maxWidth = 384
+                // Usar width e height das options se fornecidos
+                val targetWidth = options?.getInt("width") ?: 384
+                val targetHeight = options?.getInt("height")
+                
+                val maxWidth = minOf(targetWidth, 384) // Limitar a 384 pixels de largura máxima
                 val chunkHeight = 8
                 val widthAligned = (maxWidth / 8) * 8
-                val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width
-                val scaledHeight = (widthAligned * aspectRatio).toInt()
-                val paddedHeight = ((scaledHeight + chunkHeight - 1) / chunkHeight) * chunkHeight
+                
+                val finalHeight = if (targetHeight != null) {
+                    // Usar altura especificada
+                    minOf(targetHeight, 2000) // Limitar altura máxima
+                } else {
+                    // Calcular altura baseada na proporção
+                    val aspectRatio = originalBitmap.height.toFloat() / originalBitmap.width
+                    (widthAligned * aspectRatio).toInt()
+                }
+                
+                val paddedHeight = ((finalHeight + chunkHeight - 1) / chunkHeight) * chunkHeight
 
                 val finalBitmap = Bitmap.createBitmap(widthAligned, paddedHeight, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(finalBitmap)
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
                 canvas.drawColor(Color.WHITE)
-                canvas.drawBitmap(originalBitmap, Rect(0, 0, originalBitmap.width, originalBitmap.height), Rect(0, 0, widthAligned, scaledHeight), paint)
+                canvas.drawBitmap(originalBitmap, Rect(0, 0, originalBitmap.width, originalBitmap.height), Rect(0, 0, widthAligned, finalHeight), paint)
 
                 val rasterBytes = convertBitmapToRasterChunks(finalBitmap, chunkHeight)
                 for (chunk in rasterBytes) {
@@ -531,24 +545,49 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
                 val size = options?.getInt("size") ?: 5
                 val errorLevel = options?.getString("errorLevel") ?: "M"
                 
+                // Validar e ajustar o tamanho do QR code (1-16)
+                val qrSize = when {
+                    size <= 1 -> 1
+                    size <= 2 -> 2
+                    size <= 3 -> 3
+                    size <= 4 -> 4
+                    size <= 5 -> 5
+                    size <= 6 -> 6
+                    size <= 7 -> 7
+                    size <= 8 -> 8
+                    size <= 9 -> 9
+                    size <= 10 -> 10
+                    size <= 11 -> 11
+                    size <= 12 -> 12
+                    size <= 13 -> 13
+                    size <= 14 -> 14
+                    size <= 15 -> 15
+                    size <= 16 -> 16
+                    else -> 16 // Máximo suportado
+                }
+                
                 when (align.uppercase()) {
                     "LEFT" -> stream.write(ESC_COMMANDS["ALIGN_LEFT"]!!)
                     "CENTER" -> stream.write(ESC_COMMANDS["ALIGN_CENTER"]!!)
                     "RIGHT" -> stream.write(ESC_COMMANDS["ALIGN_RIGHT"]!!)
                 }
                 
+                // Inicializar QR code
                 stream.write(byteArrayOf(0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00))
-                stream.write(byteArrayOf(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, size.toByte()))
+                // Definir tamanho do módulo (1-16)
+                stream.write(byteArrayOf(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, qrSize.toByte()))
                 
+                // Definir nível de correção de erro
                 val errorLevelByte = when (errorLevel.uppercase()) {
-                    "L" -> 0x30.toByte()
-                    "M" -> 0x31.toByte()
-                    "Q" -> 0x32.toByte()
-                    "H" -> 0x33.toByte()
+                    "L" -> 0x30.toByte() // Low (7%)
+                    "M" -> 0x31.toByte() // Medium (15%)
+                    "Q" -> 0x32.toByte() // Quartile (25%)
+                    "H" -> 0x33.toByte() // High (30%)
                     else -> 0x31.toByte()
                 }
                 stream.write(byteArrayOf(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, errorLevelByte))
                 
+                // Enviar dados do QR code
                 val dataBytes = data.toByteArray(Charsets.UTF_8)
                 val dataLength = dataBytes.size + 3
                 val pL = (dataLength and 0xFF).toByte()
@@ -557,6 +596,7 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
                 stream.write(byteArrayOf(0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30))
                 stream.write(dataBytes)
                 
+                // Imprimir QR code
                 stream.write(byteArrayOf(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30))
                 
                 stream.flush()
@@ -709,23 +749,45 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
 
     private fun convertToMonochrome(bitmap: Bitmap): Bitmap {
         val monoBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(monoBitmap)
-
-        val paint = Paint().apply {
-            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-        }
-
-        canvas.drawBitmap(bitmap, 0f, 0f, paint)
-
         val pixels = IntArray(bitmap.width * bitmap.height)
-        monoBitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
+        // Aplicar conversão otimizada para impressão térmica
         for (i in pixels.indices) {
-            val gray = Color.red(pixels[i])
-            pixels[i] = if (gray < 128) Color.BLACK else Color.WHITE
+            val pixel = pixels[i]
+            val r = (pixel shr 16) and 0xFF
+            val g = (pixel shr 8) and 0xFF
+            val b = pixel and 0xFF
+            
+            // Usar fórmula de luminância otimizada para impressão térmica
+            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            
+            // Threshold adaptativo baseado na luminância média da região
+            val threshold = 128
+            pixels[i] = if (gray < threshold) Color.BLACK else Color.WHITE
         }
 
         monoBitmap.setPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         return monoBitmap
+    }
+
+    /**
+     * Converte uma imagem colorida para escala de cinza e depois para preto e branco
+     * Otimizada para impressão térmica
+     */
+    private fun convertColorImageToMonochrome(bitmap: Bitmap): Bitmap {
+        val result = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        
+        // Primeiro, converter para escala de cinza
+        val grayPaint = Paint().apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { 
+                setSaturation(0f) // Remove saturação para escala de cinza
+            })
+        }
+        canvas.drawBitmap(bitmap, 0f, 0f, grayPaint)
+        
+        // Depois, converter para preto e branco
+        return convertToMonochrome(result)
     }
 }
