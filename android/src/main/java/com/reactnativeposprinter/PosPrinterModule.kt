@@ -744,28 +744,4 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
             .emit(eventName, params)
     }
 
-    private fun convertToMonochrome(bitmap: Bitmap): Bitmap {
-        val monoBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-
-        // Aplicar conversão otimizada para impressão térmica
-        for (i in pixels.indices) {
-            val pixel = pixels[i]
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            
-            // Usar fórmula de luminância otimizada para impressão térmica
-            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
-            
-            // Threshold adaptativo baseado na luminância média da região
-            val threshold = 128
-            pixels[i] = if (gray < threshold) Color.BLACK else Color.WHITE
-        }
-
-        monoBitmap.setPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        return monoBitmap
-    }
-
 }
