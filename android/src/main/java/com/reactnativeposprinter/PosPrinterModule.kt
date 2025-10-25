@@ -390,9 +390,6 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
                 val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
                 val factoryOptions = BitmapFactory.Options().apply { inSampleSize = 2 }
                 var originalBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, factoryOptions)
-                
-                // Converter para escala de cinza e depois para preto e branco
-                originalBitmap = convertColorImageToMonochrome(originalBitmap)
 
                 // Usar width e height das options se fornecidos
                 val targetWidth = options?.getInt("width") ?: 384
@@ -771,23 +768,4 @@ class PosPrinterModule(reactContext: ReactApplicationContext) : ReactContextBase
         return monoBitmap
     }
 
-    /**
-     * Converte uma imagem colorida para escala de cinza e depois para preto e branco
-     * Otimizada para impressão térmica
-     */
-    private fun convertColorImageToMonochrome(bitmap: Bitmap): Bitmap {
-        val result = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
-        
-        // Primeiro, converter para escala de cinza
-        val grayPaint = Paint().apply {
-            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { 
-                setSaturation(0f) // Remove saturação para escala de cinza
-            })
-        }
-        canvas.drawBitmap(bitmap, 0f, 0f, grayPaint)
-        
-        // Depois, converter para preto e branco
-        return convertToMonochrome(result)
-    }
 }
